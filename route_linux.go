@@ -112,6 +112,8 @@ func routeHandle(s *NetlinkSocket, route *Route, req *NetlinkRequest) error {
 		}
 		rtAttrs = append(rtAttrs, NewRtAttr(syscall.RTA_GATEWAY, gwData))
 	}
+	// metric
+	rtAttrs = append(rtAttrs, NewRtAttr(syscall.RTA_PRIORITY, Uint32Attr(route.Metric)))
 
 	msg.Family = uint8(family)
 
@@ -119,23 +121,16 @@ func routeHandle(s *NetlinkSocket, route *Route, req *NetlinkRequest) error {
 	for _, attr := range rtAttrs {
 		req.AddData(attr)
 	}
-
-	var (
-		b      = make([]byte, 4)
-		native = NativeEndian()
-	)
-	native.PutUint32(b, uint32(route.LinkIndex))
-
-	req.AddData(NewRtAttr(syscall.RTA_OIF, b))
+	req.AddData(NewRtAttr(syscall.RTA_OIF, Uint32Attr(uint32(route.LinkIndex))))
 
 	_, err := req.Execute(s, 0)
 	return err
 }
 
 // RouteGet gets a route to a specific destination from the host system.
-// Equivalent to: 'ip route get'.
+// Equivalent to: 'ip route show match <addr>'.
 func RouteGet(s *NetlinkSocket, destination net.IP) ([]Route, error) {
-	req := NewNetlinkRequest(syscall.RTM_GETROUTE, syscall.NLM_F_REQUEST)
+	req := NewNetlinkRequest(syscall.RTM_GETROUTE, syscall.NLM_F_ROOT)
 	family := GetIPFamily(destination)
 	var destinationData []byte
 	var bitlen uint8
@@ -149,6 +144,7 @@ func RouteGet(s *NetlinkSocket, destination net.IP) ([]Route, error) {
 	msg := &RtMsg{}
 	msg.Family = uint8(family)
 	msg.Dst_len = bitlen
+	// msg.Flags |= syscall.RTM_F_CLONED
 	req.AddData(msg)
 
 	rtaDst := NewRtAttr(syscall.RTA_DST, destinationData)
@@ -168,9 +164,12 @@ func RouteGet(s *NetlinkSocket, destination net.IP) ([]Route, error) {
 			return nil, err
 		}
 
+		var table uint32
 		route := Route{}
 		for _, attr := range attrs {
 			switch attr.Attr.Type {
+			case syscall.RTA_TABLE:
+				table = native.Uint32(attr.Value[0:4])
 			case syscall.RTA_GATEWAY:
 				route.Gw = net.IP(attr.Value)
 			case syscall.RTA_PREFSRC:
@@ -183,9 +182,15 @@ func RouteGet(s *NetlinkSocket, destination net.IP) ([]Route, error) {
 			case syscall.RTA_OIF:
 				routeIndex := int(native.Uint32(attr.Value[0:4]))
 				route.LinkIndex = routeIndex
+			case syscall.RTA_PRIORITY:
+				route.Metric = native.Uint32(attr.Value[0:4])
+			default:
+				fmt.Printf("unknown attr %v\n", attr.Attr.Type)
 			}
 		}
-		res = append(res, route)
+		if table == syscall.RT_TABLE_MAIN {
+			res = append(res, route)
+		}
 	}
 	return res, nil
 

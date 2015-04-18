@@ -1,9 +1,6 @@
 package netlink
 
-import (
-	"fmt"
-	"net"
-)
+import "net"
 
 // Scope is an enum representing a route scope.
 type Scope uint8
@@ -18,9 +15,5 @@ type Route struct {
 	Dst       *net.IPNet
 	Src       net.IP
 	Gw        net.IP
-}
-
-func (r Route) String() string {
-	return fmt.Sprintf("{Ifindex: %d Dst: %s Src: %s Gw: %s}", r.LinkIndex, r.Dst,
-		r.Src, r.Gw)
+	Metric    uint32
 }
