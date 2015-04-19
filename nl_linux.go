@@ -220,31 +220,38 @@ done:
 		if err != nil {
 			return nil, err
 		}
+		// fmt.Printf("no msgs %d\n", len(msgs))
 		for _, m := range msgs {
 			if m.Header.Seq != req.Seq {
-				return nil, fmt.Errorf("Wrong Seq nr %d, expected 1", m.Header.Seq)
+				return nil, fmt.Errorf("Wrong Seq nr %d, expected %d", m.Header.Seq, req.Seq)
 			}
+			// fmt.Printf("seq %d\n", m.Header.Seq)
 			if m.Header.Pid != pid {
 				return nil, fmt.Errorf("Wrong pid %d, expected %d", m.Header.Pid, pid)
 			}
 			if m.Header.Type == syscall.NLMSG_DONE {
+				// fmt.Println("done")
 				break done
+				// } else {
+				// 	// message should be multipart
+				// 	if m.Header.Flags&syscall.NLM_F_MULTI != 0 {
+				// 		fmt.Println("multi")
+				// 	}
 			}
 			if m.Header.Type == syscall.NLMSG_ERROR {
 				native := NativeEndian()
 				error := int32(native.Uint32(m.Data[0:4]))
 				if error == 0 {
+					// fmt.Println("done err")
 					break done
 				}
+				// fmt.Printf("err return %v\n", error)
 				return nil, syscall.Errno(-error)
 			}
 			if resType != 0 && m.Header.Type != resType {
 				continue
 			}
 			res = append(res, m.Data)
-			if m.Header.Flags&syscall.NLM_F_MULTI == 0 {
-				break done
-			}
 		}
 	}
 	return res, nil
