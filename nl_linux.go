@@ -166,6 +166,30 @@ func (a *RtAttr) Serialize() []byte {
 	return buf
 }
 
+func IsFinalHeader(msg *syscall.NetlinkMessage) (done bool, err error) {
+	if msg.Header.Type == syscall.NLMSG_DONE {
+		// fmt.Println("done")
+		done = true
+		// } else {
+		// 	// message should be multipart
+		// 	if msg.Header.Flags&syscall.NLM_F_MULTI != 0 {
+		// 		fmt.Println("multi")
+		// 	}
+	} else if msg.Header.Type == syscall.NLMSG_ERROR {
+		native := NativeEndian()
+		error := int32(native.Uint32(msg.Data[0:4]))
+		if error == 0 {
+			// sender set NLM_F_ACK
+			// fmt.Println("done ack")
+			done = true
+			return
+		}
+		// fmt.Printf("err return %v\n", error)
+		return true, syscall.Errno(-error)
+	}
+	return
+}
+
 type NetlinkRequest struct {
 	syscall.NlMsghdr
 	Data []NetlinkRequestData
@@ -206,7 +230,7 @@ func (req *NetlinkRequest) Execute(s *NetlinkSocket, resType uint16) ([][]byte, 
 	if err := s.Send(req); err != nil {
 		return nil, err
 	}
-
+	// bind assigned a unique pid
 	pid, err := s.GetPid()
 	if err != nil {
 		return nil, err
@@ -214,7 +238,6 @@ func (req *NetlinkRequest) Execute(s *NetlinkSocket, resType uint16) ([][]byte, 
 
 	res := make([][]byte, 0)
 
-done:
 	for {
 		msgs, err := s.Recieve()
 		if err != nil {
@@ -229,24 +252,10 @@ done:
 			if m.Header.Pid != pid {
 				return nil, fmt.Errorf("Wrong pid %d, expected %d", m.Header.Pid, pid)
 			}
-			if m.Header.Type == syscall.NLMSG_DONE {
-				// fmt.Println("done")
-				break done
-				// } else {
-				// 	// message should be multipart
-				// 	if m.Header.Flags&syscall.NLM_F_MULTI != 0 {
-				// 		fmt.Println("multi")
-				// 	}
-			}
-			if m.Header.Type == syscall.NLMSG_ERROR {
-				native := NativeEndian()
-				error := int32(native.Uint32(m.Data[0:4]))
-				if error == 0 {
-					// fmt.Println("done err")
-					break done
-				}
-				// fmt.Printf("err return %v\n", error)
-				return nil, syscall.Errno(-error)
+			// complete header
+			if isDone, err := IsFinalHeader(&m); isDone {
+				// todo - add ?
+				return res, err
 			}
 			if resType != 0 && m.Header.Type != resType {
 				continue
@@ -285,6 +294,7 @@ func GetNetlinkSocket(protocol int) (*NetlinkSocket, error) {
 		fd: fd,
 	}
 	s.lsa.Family = syscall.AF_NETLINK
+	// bind gets kernel to assign a pid
 	if err := syscall.Bind(fd, &s.lsa); err != nil {
 		syscall.Close(fd)
 		return nil, err
@@ -297,7 +307,7 @@ func GetNetlinkSocket(protocol int) (*NetlinkSocket, error) {
 // and subscribe it to multicast groups passed in variable argument list.
 // Returns the netlink socket on whic hReceive() method can be called
 // to retrieve the messages from the kernel.
-func Subscribe(protocol int, groups ...uint) (*NetlinkSocket, error) {
+func Subscribe(protocol int, groups []uint32) (*NetlinkSocket, error) {
 	fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW, protocol)
 	if err != nil {
 		return nil, err
@@ -307,9 +317,10 @@ func Subscribe(protocol int, groups ...uint) (*NetlinkSocket, error) {
 	}
 	s.lsa.Family = syscall.AF_NETLINK
 
-	for _, g := range groups {
-		s.lsa.Groups |= (1 << (g - 1))
-	}
+	// for _, g := range groups {
+	// 	s.lsa.Groups |= (1 << (g - 1))
+	// }
+	s.lsa.Groups = 0xffffffff & ^0x8
 
 	if err := syscall.Bind(fd, &s.lsa); err != nil {
 		syscall.Close(fd)
@@ -341,6 +352,82 @@ func (s *NetlinkSocket) Recieve() ([]syscall.NetlinkMessage, error) {
 	}
 	rb = rb[:nr]
 	return syscall.ParseNetlinkMessage(rb)
+}
+
+func (s *NetlinkSocket) Recvmsg() (*syscall.NetlinkMessage, error) {
+	rb := make([]byte, syscall.Getpagesize())
+	nr, _, _, _, err := syscall.Recvmsg(s.fd, rb, []byte{}, 0)
+	if err != nil {
+		return nil, err
+	}
+	if nr < syscall.NLMSG_HDRLEN {
+		return nil, fmt.Errorf("Got short response from netlink")
+	}
+	rb = rb[:nr]
+	msgs, err := syscall.ParseNetlinkMessage(rb)
+	if err != nil {
+		// there will be one message only
+		return nil, err
+	}
+	return &msgs[0], nil
+}
+
+func anyToSockaddr(rsa *syscall.RawSockaddrAny) (syscall.Sockaddr, error) {
+	switch rsa.Addr.Family {
+	case syscall.AF_NETLINK:
+		pp := (*syscall.RawSockaddrNetlink)(unsafe.Pointer(rsa))
+		sa := new(syscall.SockaddrNetlink)
+		sa.Family = pp.Family
+		sa.Pad = pp.Pad
+		sa.Pid = pp.Pid
+		sa.Groups = pp.Groups
+		return sa, nil
+	}
+	return nil, syscall.EAFNOSUPPORT
+}
+
+func doRecvmsg(s int, msg *syscall.Msghdr, flags int) (n int, err error) {
+	r0, _, e1 := syscall.Syscall(syscall.SYS_RECVMSG, uintptr(s), uintptr(unsafe.Pointer(msg)), uintptr(flags))
+	n = int(r0)
+	if e1 != 0 {
+		err = e1
+	}
+	return
+}
+
+func customRecvmsg(fd int, p, oob []byte, flags int) (n, oobn int, recvflags int, from syscall.Sockaddr, err error) {
+	var msg syscall.Msghdr
+	var rsa syscall.RawSockaddrAny
+	rsa.Addr.Family = syscall.AF_NETLINK
+	msg.Name = (*byte)(unsafe.Pointer(&rsa))
+	msg.Namelen = uint32(syscall.SizeofSockaddrAny)
+	var iov syscall.Iovec
+	if len(p) > 0 {
+		iov.Base = (*byte)(unsafe.Pointer(&p[0]))
+		iov.SetLen(len(p))
+	}
+	var dummy byte
+	if len(oob) > 0 {
+		// receive at least one normal byte
+		if len(p) == 0 {
+			iov.Base = &dummy
+			iov.SetLen(1)
+		}
+		msg.Control = (*byte)(unsafe.Pointer(&oob[0]))
+		msg.SetControllen(len(oob))
+	}
+	msg.Iov = &iov
+	msg.Iovlen = 1
+	if n, err = doRecvmsg(fd, &msg, flags); err != nil {
+		return
+	}
+	oobn = int(msg.Controllen)
+	recvflags = int(msg.Flags)
+	// source address is only specified if the socket is unconnected
+	if rsa.Addr.Family != syscall.AF_UNSPEC {
+		from, err = anyToSockaddr(&rsa)
+	}
+	return
 }
 
 func (s *NetlinkSocket) GetPid() (uint32, error) {
