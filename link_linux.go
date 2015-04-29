@@ -108,7 +108,7 @@ func LinkList(s *NetlinkSocket) ([]Link, error) {
 	res := make([]Link, 0)
 
 	for _, m := range msgs {
-		link, err := linkDeserialize(m)
+		link, err := LinkDeserialize(m)
 		if err != nil {
 			return nil, err
 		}
@@ -169,16 +169,16 @@ func execGetLink(s *NetlinkSocket, req *NetlinkRequest) (Link, error) {
 		return nil, fmt.Errorf("Link not found")
 
 	case len(msgs) == 1:
-		return linkDeserialize(msgs[0])
+		return LinkDeserialize(msgs[0])
 
 	default:
 		return nil, fmt.Errorf("More than one link found")
 	}
 }
 
-// linkDeserialize deserializes a raw message received from netlink into
+// LinkDeserialize deserializes a raw message received from netlink into
 // a link object.
-func linkDeserialize(m []byte) (Link, error) {
+func LinkDeserialize(m []byte) (Link, error) {
 	msg := DeserializeIfInfomsg(m)
 
 	attrs, err := ParseRouteAttr(m[msg.Len():])

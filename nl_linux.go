@@ -366,68 +366,10 @@ func (s *NetlinkSocket) Recvmsg() (*syscall.NetlinkMessage, error) {
 	rb = rb[:nr]
 	msgs, err := syscall.ParseNetlinkMessage(rb)
 	if err != nil {
-		// there will be one message only
 		return nil, err
 	}
+	// there will be one message only
 	return &msgs[0], nil
-}
-
-func anyToSockaddr(rsa *syscall.RawSockaddrAny) (syscall.Sockaddr, error) {
-	switch rsa.Addr.Family {
-	case syscall.AF_NETLINK:
-		pp := (*syscall.RawSockaddrNetlink)(unsafe.Pointer(rsa))
-		sa := new(syscall.SockaddrNetlink)
-		sa.Family = pp.Family
-		sa.Pad = pp.Pad
-		sa.Pid = pp.Pid
-		sa.Groups = pp.Groups
-		return sa, nil
-	}
-	return nil, syscall.EAFNOSUPPORT
-}
-
-func doRecvmsg(s int, msg *syscall.Msghdr, flags int) (n int, err error) {
-	r0, _, e1 := syscall.Syscall(syscall.SYS_RECVMSG, uintptr(s), uintptr(unsafe.Pointer(msg)), uintptr(flags))
-	n = int(r0)
-	if e1 != 0 {
-		err = e1
-	}
-	return
-}
-
-func customRecvmsg(fd int, p, oob []byte, flags int) (n, oobn int, recvflags int, from syscall.Sockaddr, err error) {
-	var msg syscall.Msghdr
-	var rsa syscall.RawSockaddrAny
-	rsa.Addr.Family = syscall.AF_NETLINK
-	msg.Name = (*byte)(unsafe.Pointer(&rsa))
-	msg.Namelen = uint32(syscall.SizeofSockaddrAny)
-	var iov syscall.Iovec
-	if len(p) > 0 {
-		iov.Base = (*byte)(unsafe.Pointer(&p[0]))
-		iov.SetLen(len(p))
-	}
-	var dummy byte
-	if len(oob) > 0 {
-		// receive at least one normal byte
-		if len(p) == 0 {
-			iov.Base = &dummy
-			iov.SetLen(1)
-		}
-		msg.Control = (*byte)(unsafe.Pointer(&oob[0]))
-		msg.SetControllen(len(oob))
-	}
-	msg.Iov = &iov
-	msg.Iovlen = 1
-	if n, err = doRecvmsg(fd, &msg, flags); err != nil {
-		return
-	}
-	oobn = int(msg.Controllen)
-	recvflags = int(msg.Flags)
-	// source address is only specified if the socket is unconnected
-	if rsa.Addr.Family != syscall.AF_UNSPEC {
-		from, err = anyToSockaddr(&rsa)
-	}
-	return
 }
 
 func (s *NetlinkSocket) GetPid() (uint32, error) {

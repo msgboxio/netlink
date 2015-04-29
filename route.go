@@ -16,4 +16,5 @@ type Route struct {
 	Src       net.IP
 	Gw        net.IP
 	Metric    uint32
+	Table     uint32
 }
