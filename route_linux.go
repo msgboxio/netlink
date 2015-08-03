@@ -154,7 +154,7 @@ func RouteDeserialize(m []byte) (*Route, error) {
 		case syscall.RTA_PRIORITY:
 			route.Metric = native.Uint32(attr.Value[0:4])
 		default:
-			fmt.Printf("unknown attr %v\n", attr.Attr.Type)
+			fmt.Printf("unknown rt attr %v\n", attr.Attr.Type)
 		}
 	}
 	return route, nil

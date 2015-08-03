@@ -1,6 +1,9 @@
 package netlink
 
-import "net"
+import (
+	"fmt"
+	"net"
+)
 
 // Link represents a link device from netlink. Shared link attributes
 // like name may be retrieved using the Attrs() method. Unique data
@@ -10,11 +13,6 @@ type Link interface {
 	Type() string
 }
 
-type (
-	NsPid int
-	NsFd  int
-)
-
 // LinkAttrs represents data shared by most link types
 type LinkAttrs struct {
 	Index        int
@@ -23,9 +21,17 @@ type LinkAttrs struct {
 	Name         string
 	HardwareAddr net.HardwareAddr
 	Flags        net.Flags
-	ParentIndex  int         // index of the parent link device
-	MasterIndex  int         // must be the index of a bridge
-	Namespace    interface{} // nil | NsPid | NsFd
+	ParentIndex  int // index of the parent link device
+	MasterIndex  int // must be the index of a bridge
+}
+
+func (l LinkAttrs) String() string {
+	return fmt.Sprintf("{Ifindex: %d Mtu: %d Name: %s Mac: %s Flags: %s}",
+		l.Index,
+		l.MTU,
+		l.Name,
+		l.HardwareAddr,
+		l.Flags)
 }
 
 // Device links cannot be created via netlink. These links
