@@ -102,18 +102,17 @@ type XfrmPolicyTmpl struct {
 	Src   net.IP
 	Proto Proto
 	Mode  Mode
-	Reqid int
+	Reqid uint32
 }
 
 // XfrmPolicy represents an ipsec policy. It represents the overlay network
 // and has a list of XfrmPolicyTmpls representing the base addresses of
 // the policy.
 type XfrmPolicy struct {
-	Dst      *net.IPNet
-	Src      *net.IPNet
+	Sel      *XfrmSelector
 	Dir      Dir
-	Priority int
-	Index    int
+	Priority uint32
+	Index    uint32
 	Tmpls    []XfrmPolicyTmpl
 }
 
@@ -149,6 +148,10 @@ type XfrmStateEncap struct {
 	DstPort         int
 	OriginalAddress net.IP
 }
+
+const (
+	XFRM_STATE_AF_UNSPEC uint8 = 32
+)
 
 // XfrmState represents the state of an ipsec policy. It optionally
 // contains an XfrmStateAlgo for encryption and one for authentication.

@@ -119,23 +119,13 @@ func (msg *XfrmUserTmpl) Serialize() []byte {
 	return (*(*[SizeofXfrmUserTmpl]byte)(unsafe.Pointer(msg)))[:]
 }
 
-func selFromPolicy(sel *XfrmSelector, policy *XfrmPolicy) {
-	sel.Family = uint16(GetIPFamily(policy.Dst.IP))
-	sel.Daddr.FromIP(policy.Dst.IP)
-	sel.Saddr.FromIP(policy.Src.IP)
-	prefixlenD, _ := policy.Dst.Mask.Size()
-	sel.PrefixlenD = uint8(prefixlenD)
-	prefixlenS, _ := policy.Src.Mask.Size()
-	sel.PrefixlenS = uint8(prefixlenS)
-}
-
 // XfrmPolicyAdd will add an xfrm policy to the system.
 // Equivalent to: `ip xfrm policy add $policy`
 func XfrmPolicyAdd(s *NetlinkSocket, policy *XfrmPolicy) error {
 	req := NewNetlinkRequest(XFRM_MSG_NEWPOLICY, syscall.NLM_F_CREATE|syscall.NLM_F_EXCL|syscall.NLM_F_ACK)
 
 	msg := &XfrmUserpolicyInfo{}
-	selFromPolicy(&msg.Sel, policy)
+	msg.Sel = *policy.Sel
 	msg.Priority = uint32(policy.Priority)
 	msg.Index = uint32(policy.Index)
 	msg.Dir = uint8(policy.Dir)
@@ -174,7 +164,7 @@ func XfrmPolicyDel(s *NetlinkSocket, policy *XfrmPolicy) error {
 	req := NewNetlinkRequest(XFRM_MSG_DELPOLICY, syscall.NLM_F_ACK)
 
 	msg := &XfrmUserpolicyId{}
-	selFromPolicy(&msg.Sel, policy)
+	msg.Sel = *policy.Sel
 	msg.Index = uint32(policy.Index)
 	msg.Dir = uint8(policy.Dir)
 	req.AddData(msg)
@@ -207,12 +197,7 @@ func XfrmPolicyList(s *NetlinkSocket, family int) ([]XfrmPolicy, error) {
 
 		var policy XfrmPolicy
 
-		policy.Dst = msg.Sel.Daddr.ToIPNet(msg.Sel.PrefixlenD)
-		policy.Src = msg.Sel.Saddr.ToIPNet(msg.Sel.PrefixlenS)
-		policy.Priority = int(msg.Priority)
-		policy.Index = int(msg.Index)
-		policy.Dir = Dir(msg.Dir)
-
+		policy.Sel = &msg.Sel
 		attrs, err := ParseRouteAttr(m[msg.Len():])
 		if err != nil {
 			return nil, err
@@ -229,7 +214,7 @@ func XfrmPolicyList(s *NetlinkSocket, family int) ([]XfrmPolicy, error) {
 					resTmpl.Src = tmpl.Saddr.ToIP()
 					resTmpl.Proto = Proto(tmpl.XfrmId.Proto)
 					resTmpl.Mode = Mode(tmpl.Mode)
-					resTmpl.Reqid = int(tmpl.Reqid)
+					resTmpl.Reqid = tmpl.Reqid
 					policy.Tmpls = append(policy.Tmpls, resTmpl)
 				}
 			}
