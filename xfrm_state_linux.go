@@ -255,7 +255,6 @@ func (msg *XfrmEncapTmpl) Serialize() []byte {
 
 func writeStateAlgo(a *XfrmStateAlgo) []byte {
 	if strings.Contains(a.Name, "gcm") {
-		fmt.Print("aead")
 		algo := XfrmAlgoAead{
 			AlgKeyLen: uint32(len(a.Key) * 8),
 			AlgKey:    a.Key,
